@@ -21,6 +21,53 @@ cmd="${1:-install}"
 mkdir -p "$LOG_DIR"
 
 render_plist() {
+  # Build the EnvironmentVariables dict.
+  # Start with the always-present keys, then layer in any DISCORD_*/ALERT_*
+  # keys found in $PROJECT_DIR/.env.local so users don't have to re-enter
+  # webhook URLs every time the plist changes.
+  local env_block
+  env_block=$(cat <<'EOF'
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>NODE_ENV</key>
+    <string>production</string>
+    <key>PORT</key>
+    <string>__PORT__</string>
+    <key>HOSTNAME</key>
+    <string>0.0.0.0</string>
+__ENVFILE_ENTRIES__
+EOF
+  )
+  env_block="${env_block//__PORT__/${PORT}}"
+
+  local envfile_entries=""
+  if [[ -f "$PROJECT_DIR/.env.local" ]]; then
+    # Whitelist: only inject vars we know the dashboard uses. Avoids leaking
+    # anything unrelated (e.g. someone storing GITHUB_TOKEN in the same file).
+    while IFS='=' read -r key value; do
+      # Skip blanks, comments, shell continuations
+      [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
+      key="${key// /}"
+      case "$key" in
+        DISCORD_WEBHOOK_URL|DISCORD_MENTION_USER_ID|ALERT_CONSECUTIVE_FAILURES|ALERT_STALE_HOURS|ALERT_COOLDOWN_MINUTES)
+          # Strip surrounding quotes from value
+          value="${value%\"}"; value="${value#\"}"
+          value="${value%\'}"; value="${value#\'}"
+          # XML-escape the value
+          local esc="${value//&/&amp;}"
+          esc="${esc//</&lt;}"
+          esc="${esc//>/&gt;}"
+          esc="${esc//\"/&quot;}"
+          envfile_entries+="    <key>${key}</key>
+    <string>${esc}</string>
+"
+          ;;
+      esac
+    done < <(grep -E '^(DISCORD_|ALERT_)' "$PROJECT_DIR/.env.local")
+  fi
+
+  env_block="${env_block//__ENVFILE_ENTRIES__/${envfile_entries}}"
+
   cat > "$PLIST_PATH" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -60,15 +107,7 @@ render_plist() {
 
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
-    <key>NODE_ENV</key>
-    <string>production</string>
-    <key>PORT</key>
-    <string>${PORT}</string>
-    <key>HOSTNAME</key>
-    <string>0.0.0.0</string>
-  </dict>
+${env_block}  </dict>
 </dict>
 </plist>
 EOF
@@ -93,6 +132,11 @@ case "$cmd" in
       exit 1
     fi
     ensure_built
+    if [[ -f "$PROJECT_DIR/.env.local" ]]; then
+      echo "→ Found .env.local — DISCORD_/ALERT_ keys will be loaded into the plist"
+    else
+      echo "→ No .env.local found. Copy .env.example to .env.local if you want alerts."
+    fi
     echo "→ Rendering plist at $PLIST_PATH"
     render_plist
     echo "→ Loading via launchctl"
@@ -105,6 +149,7 @@ case "$cmd" in
     echo
     echo "To check status:  ./scripts/install-launchd.sh status"
     echo "To uninstall:     ./scripts/install-launchd.sh uninstall"
+    echo "To re-apply .env changes: ./scripts/install-launchd.sh install"
     ;;
 
   uninstall)
