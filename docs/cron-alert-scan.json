@@ -1,0 +1,23 @@
+{
+  "name": "cron-dashboard-alert-scan",
+  "description": "Every 15 minutes, ask the OpenClaw cron dashboard to scan jobs and fire any Discord alerts that are over threshold.",
+  "enabled": true,
+  "schedule": {
+    "kind": "cron",
+    "expr": "*/15 * * * *",
+    "tz": "America/Chicago"
+  },
+  "sessionTarget": "isolated",
+  "wakeMode": "now",
+  "payload": {
+    "kind": "agentTurn",
+    "message": "Run this single command and report back the result:\n\n```\ncurl -s -m 10 http://localhost:3737/api/alerts | head -c 2000\n```\n\nThat's it. The endpoint returns JSON like `{\"webhookConfigured\": true|false, \"scanned\": N, \"results\": [...]}`. If `webhookConfigured` is false, mention that the user needs to set DISCORD_WEBHOOK_URL. If any alerts fired, summarize them. Keep the reply to one short paragraph — this is a status check, not a build.",
+    "timeoutSeconds": 60,
+    "model": "minimax/minimax-3.0"
+  },
+  "delivery": {
+    "mode": "announce",
+    "channel": "discord",
+    "to": "discord:1484145650307174503"
+  }
+}

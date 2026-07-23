@@ -23,6 +23,8 @@ export default function Dashboard() {
   const [filter, setFilter] = useState<"all" | "failing" | "stale" | "disabled">("all");
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [lastRefreshed, setLastRefreshed] = useState<number | null>(null);
+  const [alertStatus, setAlertStatus] = useState<{ webhookConfigured: boolean; message: string } | null>(null);
+  const [testingAlert, setTestingAlert] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -41,10 +43,47 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchData();
+    // Probe alerts endpoint once on mount so we can show webhook status in the footer.
+    fetch("/api/alerts", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        setAlertStatus({
+          webhookConfigured: Boolean(j.webhookConfigured),
+          message: j.webhookConfigured ? "" : "set DISCORD_WEBHOOK_URL to enable",
+        });
+      })
+      .catch(() => {});
     if (!autoRefresh) return;
     const t = setInterval(fetchData, 30_000);
     return () => clearInterval(t);
   }, [fetchData, autoRefresh]);
+
+  const handleTestAlert = async () => {
+    setTestingAlert(true);
+    try {
+      const res = await fetch("/api/alerts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "test", note: "Test from dashboard" }),
+      });
+      const json = await res.json();
+      if (json?.test?.fired) {
+        setAlertStatus({
+          webhookConfigured: true,
+          message: `✓ Test alert sent (HTTP ${json.test.httpStatus ?? "?"})`,
+        });
+      } else {
+        setAlertStatus({
+          webhookConfigured: Boolean(process.env.NEXT_PUBLIC_DISCORD_WEBHOOK_URL),
+          message: `⚠️ ${json?.test?.reason || "unknown"}`,
+        });
+      }
+    } catch (e: any) {
+      setAlertStatus({ webhookConfigured: false, message: `❌ ${e.message}` });
+    } finally {
+      setTestingAlert(false);
+    }
+  };
 
   const handleRerun = async (jobId: string, jobName: string) => {
     if (!confirm(`Rerun "${jobName}" now? This will invoke the agent immediately.`)) return;
@@ -189,8 +228,27 @@ export default function Dashboard() {
       )}
 
       <footer className="mt-8 text-center text-xs text-muted">
-        Reads from <code className="rounded bg-panel px-1.5 py-0.5">~/.openclaw/cron/</code> ·
-        reruns invoke <code className="rounded bg-panel px-1.5 py-0.5">openclaw cron run &lt;id&gt;</code>
+        <div className="flex items-center justify-center gap-3">
+          <span>
+            Reads from <code className="rounded bg-panel px-1.5 py-0.5">~/.openclaw/cron/</code> ·
+            reruns invoke <code className="rounded bg-panel px-1.5 py-0.5">openclaw cron run &lt;id&gt;</code>
+          </span>
+          <span className="text-border">|</span>
+          <span className={alertStatus?.webhookConfigured ? "text-ok" : "text-muted"}>
+            Discord alerts: {alertStatus?.webhookConfigured ? "✓ configured" : "not configured"}
+          </span>
+          <button
+            onClick={handleTestAlert}
+            disabled={testingAlert || !alertStatus?.webhookConfigured}
+            className="rounded border border-border bg-panel px-2 py-0.5 text-xs text-gray-200 hover:bg-border disabled:opacity-40"
+            title="Fire a test Discord webhook"
+          >
+            {testingAlert ? "sending…" : "Test alert"}
+          </button>
+        </div>
+        {alertStatus?.message && (
+          <div className="mt-1 text-xs text-muted">{alertStatus.message}</div>
+        )}
       </footer>
     </div>
   );
