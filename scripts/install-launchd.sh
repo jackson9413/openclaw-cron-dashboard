@@ -12,6 +12,7 @@ set -euo pipefail
 LABEL="com.user.openclaw-cron-dashboard"
 PLIST_PATH="$HOME/Library/LaunchAgents/${LABEL}.plist"
 PROJECT_DIR="$HOME/projects/openclaw-cron-dashboard"
+STANDALONE_DIR="${PROJECT_DIR}/.next/standalone"
 LOG_DIR="$HOME/Library/Logs/openclaw-cron-dashboard"
 PORT="${PORT:-3737}"
 
@@ -30,13 +31,12 @@ render_plist() {
 
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/bash</string>
-    <string>-lc</string>
-    <string>cd ${PROJECT_DIR} && PORT=${PORT} npm start</string>
+    <string>/opt/homebrew/bin/node</string>
+    <string>server.js</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>${PROJECT_DIR}</string>
+  <string>${STANDALONE_DIR}</string>
 
   <key>RunAtLoad</key>
   <true/>
@@ -64,10 +64,25 @@ render_plist() {
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>NODE_ENV</key>
     <string>production</string>
+    <key>PORT</key>
+    <string>${PORT}</string>
+    <key>HOSTNAME</key>
+    <string>0.0.0.0</string>
   </dict>
 </dict>
 </plist>
 EOF
+}
+
+# Build if .next/standalone/server.js is missing.
+ensure_built() {
+  if [[ ! -f "${STANDALONE_DIR}/server.js" ]]; then
+    echo "→ No standalone build found at ${STANDALONE_DIR}, running npm run build"
+    ( cd "$PROJECT_DIR" && npm run build ) || {
+      echo "❌ Build failed" >&2
+      exit 1
+    }
+  fi
 }
 
 case "$cmd" in
@@ -77,12 +92,13 @@ case "$cmd" in
       echo "   Clone the repo first or update PROJECT_DIR in this script." >&2
       exit 1
     fi
+    ensure_built
     echo "→ Rendering plist at $PLIST_PATH"
     render_plist
     echo "→ Loading via launchctl"
     launchctl unload "$PLIST_PATH" 2>/dev/null || true
     launchctl load -w "$PLIST_PATH"
-    echo "✓ Installed and started."
+    echo "✓ Installed and started (using Next.js standalone server)."
     echo
     echo "Dashboard should be live at: http://localhost:${PORT}"
     echo "Logs: tail -f ${LOG_DIR}/stdout.log"

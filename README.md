@@ -47,6 +47,8 @@ A one-shot installer script handles everything: writes the plist, loads it, and 
 
 The plist is rendered to `~/Library/LaunchAgents/com.user.openclaw-cron-dashboard.plist` and keeps the dashboard alive across reboots and crashes. Logs go to `~/Library/Logs/openclaw-cron-dashboard/`.
 
+The installer runs `node server.js` from inside `.next/standalone/` directly (Next.js's standalone output) instead of `npm start`. This is faster, uses less memory, and avoids the "next start does not work with output: standalone" warning. The installer auto-runs `npm run build` if the standalone artifact is missing, and copies `public/` + `.next/static/` next to the server so static assets resolve.
+
 ## Discord failure alerts
 
 The dashboard can ping you on Discord when a job is in trouble. Two scan modes:
