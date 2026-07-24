@@ -279,7 +279,9 @@ export default function Dashboard() {
       </header>
 
       <div className="mb-4 flex items-center gap-3">
-        <div className="flex gap-2 text-sm">
+        <div className="flex items-center gap-3 text-sm">
+          <span className="text-xs uppercase tracking-wide text-muted">View</span>
+          <div className="flex gap-2">
           <button
             onClick={() => setView("active")}
             className={`rounded px-3 py-1.5 ${
@@ -315,10 +317,12 @@ export default function Dashboard() {
             Backups
             <span className="ml-1.5 text-xs opacity-70">{backups.length}</span>
           </button>
+          </div>
         </div>
 
         {view === "active" && (
-          <div className="flex gap-2 text-sm">
+          <div className="flex items-center gap-3 text-sm">
+            <span className="text-xs uppercase tracking-wide text-muted">By health</span>
             {(["all", "failing", "stale", "disabled"] as const).map((f) => (
               <button
                 key={f}
