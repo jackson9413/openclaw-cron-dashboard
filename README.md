@@ -11,6 +11,7 @@ Local-only Next.js dashboard for monitoring your OpenClaw cron jobs, viewing run
 - **Run history drawer** — full JSONL tail with summary, status, duration, token usage
 - **One-click rerun** via `openclaw cron run <id>`
 - **Soft delete + Trash panel** — move jobs to a soft-deleted trash list, restore them anytime, or purge forever
+- **Timestamped backup rotation** — every write snapshots `jobs.json`; restore any historical state from the Backups tab
 - **Discord failure alerts** — pings your server when a job is failing or goes stale
 - **Filters**: all / failing / stale / disabled
 
