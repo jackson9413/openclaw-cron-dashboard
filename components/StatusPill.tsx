@@ -333,9 +333,6 @@ function JobRow({
         </td>
         <td className="px-4 py-3 font-mono text-xs text-muted">
           <div>{scheduleStr}</div>
-          {job.state.nextRunAtMs && (
-            <div className="mt-0.5 text-accent">{relativeTime(job.state.nextRunAtMs)}</div>
-          )}
         </td>
         <td className="px-4 py-3 text-xs text-muted">
           <ModelBadge model={job.payload?.model} />
@@ -352,8 +349,15 @@ function JobRow({
             <span className="text-muted">never</span>
           )}
         </td>
-        <td className="px-4 py-3 text-xs text-muted">
-          {job.state.nextRunAtMs ? relativeTime(job.state.nextRunAtMs) : "—"}
+        <td className="px-4 py-3 text-xs">
+          {job.state.nextRunAtMs ? (
+            <>
+              <div className="text-gray-200">{humanTime(job.state.nextRunAtMs)}</div>
+              <div className="text-muted">{relativeTime(job.state.nextRunAtMs)}</div>
+            </>
+          ) : (
+            <span className="text-muted">—</span>
+          )}
         </td>
         <td className="px-4 py-3 text-xs">
           <div className="flex items-center gap-2">
