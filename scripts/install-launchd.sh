@@ -49,7 +49,7 @@ EOF
       [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
       key="${key// /}"
       case "$key" in
-        DISCORD_WEBHOOK_URL|DISCORD_MENTION_USER_ID|ALERT_CONSECUTIVE_FAILURES|ALERT_STALE_HOURS|ALERT_COOLDOWN_MINUTES)
+        DISCORD_WEBHOOK_URL|DISCORD_MENTION_USER_ID|ALERT_CONSECUTIVE_FAILURES|ALERT_STALE_HOURS|ALERT_COOLDOWN_MINUTES|BACKUP_RETENTION)
           # Strip surrounding quotes from value
           value="${value%\"}"; value="${value#\"}"
           value="${value%\'}"; value="${value#\'}"
@@ -63,7 +63,7 @@ EOF
 "
           ;;
       esac
-    done < <(grep -E '^(DISCORD_|ALERT_)' "$PROJECT_DIR/.env.local")
+    done < <(grep -E '^(DISCORD_|ALERT_|BACKUP_)' "$PROJECT_DIR/.env.local")
   fi
 
   env_block="${env_block//__ENVFILE_ENTRIES__/${envfile_entries}}"

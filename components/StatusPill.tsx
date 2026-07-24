@@ -43,9 +43,12 @@ export default function Dashboard() {
   const [lastRefreshed, setLastRefreshed] = useState<number | null>(null);
   const [alertStatus, setAlertStatus] = useState<{ webhookConfigured: boolean; message: string } | null>(null);
   const [testingAlert, setTestingAlert] = useState(false);
-  const [view, setView] = useState<"active" | "trash">("active");
+  const [view, setView] = useState<"active" | "trash" | "backups">("active");
   const [trash, setTrash] = useState<TrashEntry[]>([]);
   const [actionPending, setActionPending] = useState<string | null>(null);
+  const [backups, setBackups] = useState<{ file: string; mtimeMs: number; size: number }[]>([]);
+  const [backupRetention, setBackupRetention] = useState<number>(30);
+  const [restoringBackup, setRestoringBackup] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -121,7 +124,42 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (view === "trash") fetchTrash();
+    if (view === "backups") fetchBackups();
   }, [view, fetchTrash]);
+
+  const fetchBackups = useCallback(async () => {
+    try {
+      const res = await fetch("/api/cron/backups", { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Backups fetch failed");
+      setBackups(json.backups || []);
+      if (typeof json.retention === "number") setBackupRetention(json.retention);
+    } catch (e: any) {
+      setBackups([]);
+      setError((prev) => prev ?? `backups fetch failed: ${e.message}`);
+    }
+  }, []);
+
+  const handleRestoreBackup = async (file: string) => {
+    if (!confirm(`Restore jobs.json from "${file}"?\n\nThis REPLACES the current jobs.json (which will itself be backed up first, so it's recoverable). All current jobs will be overwritten with the snapshot's contents.`)) return;
+    setRestoringBackup(file);
+    try {
+      const res = await fetch("/api/cron/backups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "restore", file }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Restore failed");
+      alert(`✓ Restored jobs.json from ${file}. Reload to see the snapshot's data.`);
+      await fetchData();
+      await fetchBackups();
+    } catch (e: any) {
+      alert(`❌ Restore failed: ${e.message}`);
+    } finally {
+      setRestoringBackup(null);
+    }
+  };
 
   const handleDelete = async (jobId: string, jobName: string) => {
     if (!confirm(`Move "${jobName}" to trash?\n\nIt will stop running immediately. You can restore it from the Trash panel anytime.`)) return;
@@ -266,6 +304,17 @@ export default function Dashboard() {
             Trash
             <span className="ml-1.5 text-xs opacity-70">{trash.length}</span>
           </button>
+          <button
+            onClick={() => setView("backups")}
+            className={`rounded px-3 py-1.5 ${
+              view === "backups"
+                ? "bg-accent/20 text-accent"
+                : "bg-panel text-muted hover:text-gray-200"
+            }`}
+          >
+            Backups
+            <span className="ml-1.5 text-xs opacity-70">{backups.length}</span>
+          </button>
         </div>
 
         {view === "active" && (
@@ -348,6 +397,16 @@ export default function Dashboard() {
           onRestore={handleRestore}
           onPurge={handlePurge}
           onRefresh={fetchTrash}
+        />
+      )}
+
+      {view === "backups" && (
+        <BackupsPanel
+          backups={backups}
+          retention={backupRetention}
+          restoringId={restoringBackup}
+          onRestore={handleRestoreBackup}
+          onRefresh={fetchBackups}
         />
       )}
 
@@ -512,6 +571,82 @@ function TrashPanel({
                 </tr>
               );
             })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function BackupsPanel({
+  backups,
+  retention,
+  restoringId,
+  onRestore,
+  onRefresh,
+}: {
+  backups: { file: string; mtimeMs: number; size: number }[];
+  retention: number;
+  restoringId: string | null;
+  onRestore: (file: string) => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-border bg-panel">
+      <div className="flex items-center justify-between border-b border-border bg-accent/10 px-4 py-3 text-sm">
+        <div className="text-accent">
+          💾 Backups · {backups.length} of {retention} retained (oldest pruned on next write)
+        </div>
+        <button
+          onClick={onRefresh}
+          className="rounded border border-border bg-panel px-2 py-1 text-xs text-muted hover:text-gray-200"
+        >
+          Refresh
+        </button>
+      </div>
+      {backups.length === 0 ? (
+        <div className="px-4 py-12 text-center text-sm text-muted">
+          No backups yet. Backups are created automatically before every dashboard write (delete / restore / purge).
+          <br />
+          Override retention via <code className="rounded bg-border/30 px-1">BACKUP_RETENTION</code> in the launchd plist.
+        </div>
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="bg-panel/60 text-xs uppercase tracking-wide text-muted">
+            <tr className="border-b border-border">
+              <th className="px-4 py-3 text-left">File</th>
+              <th className="px-4 py-3 text-left">Saved</th>
+              <th className="px-4 py-3 text-right">Size</th>
+              <th className="px-4 py-3 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {backups.map((b) => (
+              <tr key={b.file} className="border-b border-border/50">
+                <td className="px-4 py-3">
+                  <code className="rounded bg-border/30 px-1.5 py-0.5 font-mono text-xs text-gray-200">
+                    {b.file}
+                  </code>
+                </td>
+                <td className="px-4 py-3 text-xs">
+                  <div className="text-gray-200">{humanTime(b.mtimeMs)}</div>
+                  <div className="text-muted">{relativeTime(b.mtimeMs)}</div>
+                </td>
+                <td className="px-4 py-3 text-right text-xs text-muted">
+                  {(b.size / 1024).toFixed(1)} KB
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <button
+                    onClick={() => onRestore(b.file)}
+                    disabled={restoringId === b.file}
+                    className="rounded bg-warn/20 px-3 py-1 text-xs text-warn hover:bg-warn/30 disabled:opacity-40"
+                    title="Replace jobs.json with this snapshot (current state is itself backed up first)"
+                  >
+                    {restoringId === b.file ? "Restoring…" : "Restore"}
+                  </button>
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       )}
