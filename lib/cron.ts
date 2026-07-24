@@ -67,6 +67,8 @@ export type CronRun = {
   nextRunAtMs?: number;
   model?: string;
   provider?: string;
+  sessionKey?: string;
+  sessionId?: string;
   usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
   error?: string;
 };

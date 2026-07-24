@@ -490,6 +490,34 @@ function ModelBadge({ model }: { model?: string }) {
   );
 }
 
+// Parse the agent name out of an OpenClaw sessionKey like
+// "agent:<name>:<channel>:<id>:<action>:<runId>". Falls back to "—" if the key
+// is missing or malformed.
+function parseAgentFromSessionKey(sessionKey?: string): string {
+  if (!sessionKey) return "—";
+  const parts = sessionKey.split(":");
+  if (parts.length < 2 || parts[0] !== "agent") return "—";
+  return parts[1] || "—";
+}
+
+// Renders which agent workspace ran the cron job. OpenClaw stores it in
+// recentRuns[].sessionKey; we read the most recent run so future agent
+// pinning shows up here immediately without schema changes.
+function AgentChip({ sessionKey }: { sessionKey?: string }) {
+  const name = parseAgentFromSessionKey(sessionKey);
+  if (name === "—") {
+    return <span className="text-muted">—</span>;
+  }
+  return (
+    <span
+      title={sessionKey || name}
+      className="inline-block max-w-[8rem] truncate rounded bg-ok/15 px-2 py-0.5 font-mono text-[11px] text-ok align-middle"
+    >
+      {name}
+    </span>
+  );
+}
+
 // Renders duration stats: avg over last 10 runs (top) + last-run duration (below).
 // Color-codes the avg so long jobs stand out: >=5m = warn, >=10m = err.
 function DurationCell({ recentRuns }: { recentRuns: { durationMs?: number }[] }) {
@@ -732,7 +760,10 @@ function JobRow({
           <div>{scheduleStr}</div>
         </td>
         <td className="px-4 py-3 text-xs text-muted">
-          <ModelBadge model={job.payload?.model} />
+          <div className="flex flex-col gap-1">
+            <ModelBadge model={job.payload?.model} />
+            <AgentChip sessionKey={job.recentRuns?.[0]?.sessionKey} />
+          </div>
         </td>
         <td className="px-4 py-3 text-xs">
           {lastRun ? (
