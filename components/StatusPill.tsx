@@ -191,6 +191,7 @@ export default function Dashboard() {
             <tr className="border-b border-border">
               <th className="px-4 py-3 text-left">Job</th>
               <th className="px-4 py-3 text-left">Schedule</th>
+              <th className="px-4 py-3 text-left">Model</th>
               <th className="px-4 py-3 text-left">Last run</th>
               <th className="px-4 py-3 text-left">Next run</th>
               <th className="px-4 py-3 text-left">Success rate</th>
@@ -210,7 +211,7 @@ export default function Dashboard() {
             ))}
             {filteredJobs.length === 0 && !loading && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-muted">
+                <td colSpan={7} className="px-4 py-8 text-center text-muted">
                   No jobs match this filter.
                 </td>
               </tr>
@@ -275,6 +276,25 @@ function StatusPill({ job }: { job: ApiJob }) {
   return <span className="rounded bg-ok/20 px-2 py-0.5 text-xs text-ok">healthy</span>;
 }
 
+// Renders the model identifier (e.g. "minimax/minimax-3.0") as a compact chip.
+// Trims long names, falls back to a muted "default" pill when missing.
+function ModelBadge({ model }: { model?: string }) {
+  if (!model) {
+    return <span className="text-muted">default</span>;
+  }
+  // Split "provider/model" -> show just the model part on the chip, hover for full.
+  const parts = model.split("/");
+  const display = parts[parts.length - 1] || model;
+  return (
+    <span
+      title={model}
+      className="inline-block max-w-[10rem] truncate rounded bg-accent/15 px-2 py-0.5 font-mono text-[11px] text-accent align-middle"
+    >
+      {display}
+    </span>
+  );
+}
+
 function JobRow({
   job,
   isSelected,
@@ -316,6 +336,9 @@ function JobRow({
           {job.state.nextRunAtMs && (
             <div className="mt-0.5 text-accent">{relativeTime(job.state.nextRunAtMs)}</div>
           )}
+        </td>
+        <td className="px-4 py-3 text-xs text-muted">
+          <ModelBadge model={job.payload?.model} />
         </td>
         <td className="px-4 py-3 text-xs">
           {lastRun ? (
