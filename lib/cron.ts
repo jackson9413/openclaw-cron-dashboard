@@ -4,10 +4,29 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import cronParser from "cron-parser";
 
 const CRON_DIR = path.join(os.homedir(), ".openclaw", "cron");
 const JOBS_FILE = path.join(CRON_DIR, "jobs.json");
 const RUNS_DIR = path.join(CRON_DIR, "runs");
+
+// Compute the next-run timestamp (ms) for a job's schedule.
+// OpenClaw's jobs.json stores schedule.expr + schedule.tz but leaves
+// state.nextRunAtMs empty on disk — the CLI computes it on-the-fly.
+// We replicate that here so the dashboard can show "Next run" without
+// shelling out to `openclaw cron show` for each job.
+export function computeNextRunAtMs(schedule: CronJob["schedule"]): number | undefined {
+  try {
+    if (schedule.kind !== "cron" || !schedule.expr) return undefined;
+    const opts: cronParser.ParserOptions = { currentDate: new Date() };
+    if (schedule.tz) opts.tz = schedule.tz;
+    const interval = cronParser.parseExpression(schedule.expr, opts);
+    const next = interval.next();
+    return next.getTime();
+  } catch {
+    return undefined;
+  }
+}
 
 export type CronJob = {
   id: string;
@@ -111,8 +130,16 @@ export async function readAllJobsWithRuns(limit = 10): Promise<JobWithRuns[]> {
       const lastSuccess = finishedRuns.find((r) => r.status === "ok");
       const lastFailure = finishedRuns.find((r) => r.status === "error");
 
+      // OpenClaw doesn't persist nextRunAtMs, so compute it ourselves.
+      const computedNext = computeNextRunAtMs(job.schedule);
+      const mergedState = {
+        ...job.state,
+        nextRunAtMs: job.state?.nextRunAtMs ?? computedNext,
+      };
+
       return {
         ...job,
+        state: mergedState,
         recentRuns,
         lastSuccessAt: lastSuccess?.runAtMs,
         lastFailureAt: lastFailure?.runAtMs,
