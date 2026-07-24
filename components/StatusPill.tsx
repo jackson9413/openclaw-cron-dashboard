@@ -14,6 +14,24 @@ type ApiResponse = {
   error?: string;
 };
 
+type TrashEntry = {
+  job: {
+    id: string;
+    name: string;
+    schedule: { kind: string; expr?: string; tz?: string };
+    payload?: { model?: string };
+    enabled?: boolean;
+    description?: string;
+  };
+  deletedAtMs: number;
+};
+
+type TrashResponse = {
+  trash: TrashEntry[];
+  fetchedAt: number;
+  error?: string;
+};
+
 export default function Dashboard() {
   const [data, setData] = useState<ApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -25,6 +43,9 @@ export default function Dashboard() {
   const [lastRefreshed, setLastRefreshed] = useState<number | null>(null);
   const [alertStatus, setAlertStatus] = useState<{ webhookConfigured: boolean; message: string } | null>(null);
   const [testingAlert, setTestingAlert] = useState(false);
+  const [view, setView] = useState<"active" | "trash">("active");
+  const [trash, setTrash] = useState<TrashEntry[]>([]);
+  const [actionPending, setActionPending] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -82,6 +103,71 @@ export default function Dashboard() {
       setAlertStatus({ webhookConfigured: false, message: `❌ ${e.message}` });
     } finally {
       setTestingAlert(false);
+    }
+  };
+
+  const fetchTrash = useCallback(async () => {
+    try {
+      const res = await fetch("/api/cron/trash", { cache: "no-store" });
+      const json: TrashResponse = await res.json();
+      if (!res.ok) throw new Error(json.error || "Trash fetch failed");
+      setTrash(json.trash);
+    } catch (e: any) {
+      // Non-fatal — still surface in the trash panel.
+      setTrash([]);
+      setError((prev) => prev ?? `trash fetch failed: ${e.message}`);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (view === "trash") fetchTrash();
+  }, [view, fetchTrash]);
+
+  const handleDelete = async (jobId: string, jobName: string) => {
+    if (!confirm(`Move "${jobName}" to trash?\n\nIt will stop running immediately. You can restore it from the Trash panel anytime.`)) return;
+    setActionPending(jobId);
+    try {
+      const res = await fetch(`/api/cron/${jobId}/delete`, { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Delete failed");
+      alert(`🗑️ "${jobName}" moved to trash.`);
+      await fetchData();
+    } catch (e: any) {
+      alert(`❌ Delete failed: ${e.message}`);
+    } finally {
+      setActionPending(null);
+    }
+  };
+
+  const handleRestore = async (jobId: string, jobName: string) => {
+    if (!confirm(`Restore "${jobName}" from trash? It will return to active jobs and resume on its schedule.`)) return;
+    setActionPending(jobId);
+    try {
+      const res = await fetch(`/api/cron/${jobId}/restore`, { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Restore failed");
+      alert(`✓ "${jobName}" restored.`);
+      await Promise.all([fetchData(), fetchTrash()]);
+    } catch (e: any) {
+      alert(`❌ Restore failed: ${e.message}`);
+    } finally {
+      setActionPending(null);
+    }
+  };
+
+  const handlePurge = async (jobId: string, jobName: string) => {
+    if (!confirm(`PERMANENTLY delete "${jobName}"?\n\nThis cannot be undone. The job, its run history, and its JSONL log file will be erased forever. If a jobs.json.bak exists, recovery is possible but you'll lose everything after the backup point.\n\nType OK to confirm.`)) return;
+    setActionPending(jobId);
+    try {
+      const res = await fetch(`/api/cron/${jobId}/purge`, { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Purge failed");
+      alert(`🔥 "${jobName}" permanently deleted.`);
+      await fetchTrash();
+    } catch (e: any) {
+      alert(`❌ Purge failed: ${e.message}`);
+    } finally {
+      setActionPending(null);
     }
   };
 
@@ -154,25 +240,56 @@ export default function Dashboard() {
         </div>
       </header>
 
-      <div className="mb-4 flex gap-2 text-sm">
-        {(["all", "failing", "stale", "disabled"] as const).map((f) => (
+      <div className="mb-4 flex items-center gap-3">
+        <div className="flex gap-2 text-sm">
           <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`rounded px-3 py-1.5 capitalize ${
-              filter === f
+            onClick={() => setView("active")}
+            className={`rounded px-3 py-1.5 ${
+              view === "active"
                 ? "bg-accent/20 text-accent"
                 : "bg-panel text-muted hover:text-gray-200"
             }`}
           >
-            {f}
-            {summary && f !== "all" && (
-              <span className="ml-1.5 text-xs opacity-70">
-                {f === "failing" ? summary.failing : f === "stale" ? summary.stale : summary.disabled}
-              </span>
+            Active
+            {summary && (
+              <span className="ml-1.5 text-xs opacity-70">{summary.total}</span>
             )}
           </button>
-        ))}
+          <button
+            onClick={() => setView("trash")}
+            className={`rounded px-3 py-1.5 ${
+              view === "trash"
+                ? "bg-warn/20 text-warn"
+                : "bg-panel text-muted hover:text-gray-200"
+            }`}
+          >
+            Trash
+            <span className="ml-1.5 text-xs opacity-70">{trash.length}</span>
+          </button>
+        </div>
+
+        {view === "active" && (
+          <div className="flex gap-2 text-sm">
+            {(["all", "failing", "stale", "disabled"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={`rounded px-3 py-1.5 capitalize ${
+                  filter === f
+                    ? "bg-accent/20 text-accent"
+                    : "bg-panel text-muted hover:text-gray-200"
+                }`}
+              >
+                {f}
+                {summary && f !== "all" && (
+                  <span className="ml-1.5 text-xs opacity-70">
+                    {f === "failing" ? summary.failing : f === "stale" ? summary.stale : summary.disabled}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {error && (
@@ -181,10 +298,11 @@ export default function Dashboard() {
         </div>
       )}
 
-      {loading && !data && (
+      {loading && !data && view === "active" && (
         <div className="text-muted">Loading…</div>
       )}
 
+      {view === "active" && (
       <div className="overflow-hidden rounded-lg border border-border bg-panel">
         <table className="w-full text-sm">
           <thead className="bg-panel/60 text-xs uppercase tracking-wide text-muted">
@@ -205,8 +323,10 @@ export default function Dashboard() {
                 job={job}
                 isSelected={selectedJobId === job.id}
                 isRerunning={rerunningId === job.id}
+                isDeleting={actionPending === job.id}
                 onSelect={() => setSelectedJobId(selectedJobId === job.id ? null : job.id)}
                 onRerun={() => handleRerun(job.id, job.name)}
+                onDelete={() => handleDelete(job.id, job.name)}
               />
             ))}
             {filteredJobs.length === 0 && !loading && (
@@ -219,8 +339,19 @@ export default function Dashboard() {
           </tbody>
         </table>
       </div>
+      )}
 
-      {selectedJobId && (
+      {view === "trash" && (
+        <TrashPanel
+          entries={trash}
+          pendingId={actionPending}
+          onRestore={handleRestore}
+          onPurge={handlePurge}
+          onRefresh={fetchTrash}
+        />
+      )}
+
+      {view === "active" && selectedJobId && (
         <RunsDrawer
           jobId={selectedJobId}
           jobName={data?.jobs.find((j) => j.id === selectedJobId)?.name || ""}
@@ -295,18 +426,115 @@ function ModelBadge({ model }: { model?: string }) {
   );
 }
 
+function TrashPanel({
+  entries,
+  pendingId,
+  onRestore,
+  onPurge,
+  onRefresh,
+}: {
+  entries: TrashEntry[];
+  pendingId: string | null;
+  onRestore: (id: string, name: string) => void;
+  onPurge: (id: string, name: string) => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-warn/40 bg-panel">
+      <div className="flex items-center justify-between border-b border-border bg-warn/10 px-4 py-3 text-sm">
+        <div className="text-warn">
+          🗑️ Trash · {entries.length} {entries.length === 1 ? "job" : "jobs"} archived
+        </div>
+        <button
+          onClick={onRefresh}
+          className="rounded border border-border bg-panel px-2 py-1 text-xs text-muted hover:text-gray-200"
+        >
+          Refresh
+        </button>
+      </div>
+      {entries.length === 0 ? (
+        <div className="px-4 py-12 text-center text-sm text-muted">
+          Trash is empty. Deleted jobs appear here and can be restored anytime.
+        </div>
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="bg-panel/60 text-xs uppercase tracking-wide text-muted">
+            <tr className="border-b border-border">
+              <th className="px-4 py-3 text-left">Job</th>
+              <th className="px-4 py-3 text-left">Schedule</th>
+              <th className="px-4 py-3 text-left">Model</th>
+              <th className="px-4 py-3 text-left">Deleted</th>
+              <th className="px-4 py-3 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map((entry) => {
+              const j = entry.job;
+              const isPending = pendingId === j.id;
+              const scheduleStr =
+                j.schedule?.kind === "cron"
+                  ? `${j.schedule.expr ?? ""}${j.schedule.tz ? ` ${j.schedule.tz.split("/").pop()}` : ""}`
+                  : "one-shot";
+              return (
+                <tr key={j.id} className="border-b border-border/50">
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-gray-100">{j.name}</div>
+                    <div className="text-xs text-muted">{j.id}</div>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-muted">{scheduleStr || "—"}</td>
+                  <td className="px-4 py-3 text-xs">
+                    <ModelBadge model={j.payload?.model} />
+                  </td>
+                  <td className="px-4 py-3 text-xs">
+                    <div className="text-gray-200">{humanTime(entry.deletedAtMs)}</div>
+                    <div className="text-muted">{relativeTime(entry.deletedAtMs)}</div>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => onRestore(j.id, j.name)}
+                        disabled={isPending}
+                        className="rounded bg-ok/20 px-3 py-1 text-xs text-ok hover:bg-ok/30 disabled:opacity-40"
+                        title="Move this job back to active jobs"
+                      >
+                        {isPending ? "…" : "Restore"}
+                      </button>
+                      <button
+                        onClick={() => onPurge(j.id, j.name)}
+                        disabled={isPending}
+                        className="rounded bg-err/15 px-3 py-1 text-xs text-err hover:bg-err/25 disabled:opacity-40"
+                        title="Permanently delete (no undo)"
+                      >
+                        Purge
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 function JobRow({
   job,
   isSelected,
   isRerunning,
+  isDeleting,
   onSelect,
   onRerun,
+  onDelete,
 }: {
   job: ApiJob;
   isSelected: boolean;
   isRerunning: boolean;
+  isDeleting: boolean;
   onSelect: () => void;
   onRerun: () => void;
+  onDelete: () => void;
 }) {
   const lastRun = job.lastSuccessAt || job.lastFailureAt;
   const lastRunStatus = job.lastSuccessAt ? "ok" : job.lastFailureAt ? "error" : null;
@@ -375,13 +603,23 @@ function JobRow({
           </div>
         </td>
         <td className="px-4 py-3 text-right">
-          <button
-            onClick={onRerun}
-            disabled={isRerunning}
-            className="rounded bg-accent/20 px-3 py-1 text-xs text-accent hover:bg-accent/30 disabled:opacity-40"
-          >
-            {isRerunning ? "Running…" : "Rerun"}
-          </button>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              onClick={onRerun}
+              disabled={isRerunning || isDeleting}
+              className="rounded bg-accent/20 px-3 py-1 text-xs text-accent hover:bg-accent/30 disabled:opacity-40"
+            >
+              {isRerunning ? "Running…" : "Rerun"}
+            </button>
+            <button
+              onClick={onDelete}
+              disabled={isRerunning || isDeleting}
+              className="rounded bg-err/15 px-3 py-1 text-xs text-err hover:bg-err/25 disabled:opacity-40"
+              title="Move to trash (soft delete)"
+            >
+              {isDeleting ? "…" : "Delete"}
+            </button>
+          </div>
         </td>
       </tr>
     </>
