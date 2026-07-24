@@ -365,6 +365,7 @@ export default function Dashboard() {
               <th className="px-4 py-3 text-left">Model</th>
               <th className="px-4 py-3 text-left">Last run</th>
               <th className="px-4 py-3 text-left">Next run</th>
+              <th className="px-4 py-3 text-left">Avg duration</th>
               <th className="px-4 py-3 text-left">Success rate</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
@@ -384,7 +385,7 @@ export default function Dashboard() {
             ))}
             {filteredJobs.length === 0 && !loading && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-muted">
+                <td colSpan={8} className="px-4 py-8 text-center text-muted">
                   No jobs match this filter.
                 </td>
               </tr>
@@ -486,6 +487,35 @@ function ModelBadge({ model }: { model?: string }) {
     >
       {display}
     </span>
+  );
+}
+
+// Renders duration stats: avg over last 10 runs (top) + last-run duration (below).
+// Color-codes the avg so long jobs stand out: >=5m = warn, >=10m = err.
+function DurationCell({ recentRuns }: { recentRuns: { durationMs?: number }[] }) {
+  const finished = (recentRuns || []).filter(
+    (r) => typeof r.durationMs === "number" && r.durationMs > 0
+  );
+  if (finished.length === 0) {
+    return <span className="text-muted">—</span>;
+  }
+  const last = finished[0].durationMs!; // newest is first
+  const sample = finished.slice(0, 10);
+  const avg = Math.round(
+    sample.reduce((sum, r) => sum + (r.durationMs || 0), 0) / sample.length
+  );
+  const avgColor =
+    avg >= 600_000 ? "text-err" : avg >= 300_000 ? "text-warn" : "text-gray-200";
+  const shown = sample.length < 10 ? `${sample.length}` : "10";
+  return (
+    <>
+      <div className={avgColor} title={`Average over ${shown} run${shown === "1" ? "" : "s"}`}>
+        {humanDuration(avg)}
+      </div>
+      <div className="text-muted" title="Most recent run">
+        last: {humanDuration(last)}
+      </div>
+    </>
   );
 }
 
@@ -725,6 +755,9 @@ function JobRow({
           ) : (
             <span className="text-muted">—</span>
           )}
+        </td>
+        <td className="px-4 py-3 text-xs">
+          <DurationCell recentRuns={job.recentRuns} />
         </td>
         <td className="px-4 py-3 text-xs">
           <div className="flex items-center gap-2">
